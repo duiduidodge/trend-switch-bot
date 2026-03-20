@@ -1,0 +1,32 @@
+[project]
+name = "trend-switch-bot"
+version = "0.1.0"
+description = "Regime-adaptive Hyperliquid trading bot for BTC and ETH."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0,<1.0.0",
+  "uvicorn[standard]>=0.30.0,<1.0.0",
+  "pydantic>=2.8.0,<3.0.0",
+  "pydantic-settings>=2.4.0,<3.0.0",
+  "pandas>=2.2.2,<3.0.0",
+  "numpy>=2.1.0,<3.0.0",
+  "requests>=2.32.0,<3.0.0",
+  "hyperliquid-python-sdk==0.22.0",
+  "eth-account>=0.13.7,<0.14.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0,<9.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

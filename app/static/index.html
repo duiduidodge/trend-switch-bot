@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trend Switch Bot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/dashboard.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand__mark">TS</div>
+          <div>
+            <p class="eyebrow">Crypto Trading Dashboard</p>
+            <h1>Trend Switch Bot</h1>
+          </div>
+        </div>
+        <div class="topbar__status">
+          <span class="status-chip"><em>Env</em><strong id="envPill">-</strong></span>
+          <span class="status-chip"><em>Mode</em><strong id="dryRunPill">-</strong></span>
+          <span class="status-chip"><em>Venue</em><strong id="venuePill">-</strong></span>
+          <span class="status-chip"><em>Updated</em><strong id="lastRefresh">-</strong></span>
+        </div>
+      </header>
+
+      <section class="summary-grid">
+        <article class="summary-card summary-card--primary">
+          <span class="summary-label">Account Value</span>
+          <strong class="summary-value" id="accountValue">$0</strong>
+          <span class="summary-sub" id="riskPosture">-</span>
+        </article>
+        <article class="summary-card">
+          <span class="summary-label">Daily Closed P&amp;L</span>
+          <strong class="summary-value" id="dailyPnl">$0</strong>
+          <span class="summary-sub" id="lossLimitDetail">$0</span>
+        </article>
+        <article class="summary-card">
+          <span class="summary-label">Open Positions</span>
+          <strong class="summary-value" id="positionsCount">0 / 0</strong>
+          <span class="summary-sub" id="positionSummary">No live positions</span>
+        </article>
+        <article class="summary-card">
+          <span class="summary-label">Open Orders</span>
+          <strong class="summary-value" id="ordersCount">0</strong>
+          <span class="summary-sub"><span id="scanCadence">-</span> signal / <span id="monitorCadence">-</span> monitor</span>
+        </article>
+      </section>
+
+      <section class="action-bar">
+        <div class="action-bar__copy">
+          <p class="eyebrow">Operator Controls</p>
+          <h2>Run the bot manually or monitor the current book.</h2>
+        </div>
+        <div class="action-bar__buttons">
+          <button class="action-btn action-btn--primary" data-action="signals">Run Signal Scan</button>
+          <button class="action-btn" data-action="monitor">Run Monitor</button>
+          <button class="action-btn" id="refreshButton">Refresh</button>
+        </div>
+      </section>
+
+      <main class="dashboard-grid">
+        <section class="panel panel--positions">
+          <div class="panel__header">
+            <div>
+              <p class="eyebrow">Portfolio</p>
+              <h3>Open Positions</h3>
+            </div>
+            <span class="panel__meta">BTC and ETH</span>
+          </div>
+          <div class="position-list" id="positionsGrid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="eyebrow">Signals</p>
+              <h3>Regime Matrix</h3>
+            </div>
+            <span class="panel__meta">1H latch state</span>
+          </div>
+          <div class="simple-table" id="signalMatrix"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="eyebrow">Execution</p>
+              <h3>Working Orders</h3>
+            </div>
+            <span class="panel__meta">Exchange queue</span>
+          </div>
+          <div class="simple-table" id="openOrders"></div>
+        </section>
+
+        <section class="panel panel--wide">
+          <div class="panel__header">
+            <div>
+              <p class="eyebrow">Decisions</p>
+              <h3>Recent Actions</h3>
+            </div>
+            <span class="panel__meta">Latest asset actions and system log</span>
+          </div>
+          <div class="split-panels">
+            <div class="subpanel">
+              <div class="subpanel__title">Decision Tape</div>
+              <div class="simple-table" id="latestActions"></div>
+            </div>
+            <div class="subpanel">
+              <div class="subpanel__title">System Log</div>
+              <div class="simple-table" id="logStream"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast-zone" id="toastZone"></div>
+    <script src="/static/dashboard.js" defer></script>
+  </body>
+</html>

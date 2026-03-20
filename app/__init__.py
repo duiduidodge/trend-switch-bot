@@ -1,0 +1,1 @@
+"""Trend Switch Bot package."""
