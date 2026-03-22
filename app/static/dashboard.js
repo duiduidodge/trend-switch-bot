@@ -61,7 +61,7 @@ async function callJson(url, options = {}) {
 function renderOverview(data) {
   const overview = data.overview;
   els.envPill.textContent = overview.env;
-  els.dryRunPill.textContent = overview.dry_run ? "Dry Run" : "Live";
+  els.dryRunPill.textContent = overview.dry_run ? "Paper" : "Live";
   els.venuePill.textContent = overview.hyperliquid_env;
   els.scanCadence.textContent = `${data.controls.signal_scan_interval_minutes} min`;
   els.monitorCadence.textContent = `${data.controls.monitor_interval_minutes} min`;
@@ -122,7 +122,8 @@ function positionCard(position) {
 
 function renderPositions(data) {
   const positions = data.positions || [];
-  els.positionSummary.textContent = positions.length ? `${positions.length} live position${positions.length > 1 ? "s" : ""}` : "No live positions";
+  const positionLabel = data.overview?.dry_run ? "paper" : "live";
+  els.positionSummary.textContent = positions.length ? `${positions.length} ${positionLabel} position${positions.length > 1 ? "s" : ""}` : `No ${positionLabel} positions`;
   if (!positions.length) {
     els.positionsGrid.innerHTML = `<div class="empty-state">The book is flat. Run a signal scan or wait for the next scheduled cycle.</div>`;
     return;
@@ -193,7 +194,7 @@ function renderLatestActions(data) {
 function renderOrders(data) {
   const orders = data.open_orders || [];
   if (!orders.length) {
-    els.openOrders.innerHTML = `<div class="empty-state">No resting orders are live on the exchange.</div>`;
+    els.openOrders.innerHTML = `<div class="empty-state">No resting ${data.overview?.dry_run ? "paper" : "exchange"} orders are active.</div>`;
     return;
   }
   els.openOrders.innerHTML = `

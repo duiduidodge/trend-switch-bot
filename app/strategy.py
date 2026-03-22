@@ -12,6 +12,40 @@ def _count_open_positions(positions: list[PositionSnapshot]) -> int:
     return sum(1 for position in positions if abs(position.size_asset) > 0)
 
 
+def _primary_trigger_status(snapshot: MarketSnapshot, direction: Direction, strategy: StrategyName) -> tuple[bool, str]:
+    if strategy == StrategyName.BTC_HMA:
+        if direction == Direction.LONG:
+            trend_state = bool(snapshot.hma_fast and snapshot.hma_slow and snapshot.hma_fast > snapshot.hma_slow and snapshot.latest_close > snapshot.hma_slow)
+            signal_ok = bool(snapshot.hma_cross_up or trend_state)
+            details = (
+                f"hma_cross_up={bool(snapshot.hma_cross_up)}, "
+                f"trend_state_bullish={trend_state}"
+            )
+        else:
+            trend_state = bool(snapshot.hma_fast and snapshot.hma_slow and snapshot.hma_fast < snapshot.hma_slow and snapshot.latest_close < snapshot.hma_slow)
+            signal_ok = bool(snapshot.hma_cross_down or trend_state)
+            details = (
+                f"hma_cross_down={bool(snapshot.hma_cross_down)}, "
+                f"trend_state_bearish={trend_state}"
+            )
+    else:
+        if direction == Direction.LONG:
+            momentum_state = bool(snapshot.macz_value is not None and snapshot.macz_signal is not None and snapshot.macz_value > snapshot.macz_signal and (snapshot.macz_hist or 0) > 0)
+            signal_ok = bool(snapshot.macz_cross_up or momentum_state)
+            details = (
+                f"macz_cross_up={bool(snapshot.macz_cross_up)}, "
+                f"momentum_state_bullish={momentum_state}"
+            )
+        else:
+            momentum_state = bool(snapshot.macz_value is not None and snapshot.macz_signal is not None and snapshot.macz_value < snapshot.macz_signal and (snapshot.macz_hist or 0) < 0)
+            signal_ok = bool(snapshot.macz_cross_down or momentum_state)
+            details = (
+                f"macz_cross_down={bool(snapshot.macz_cross_down)}, "
+                f"momentum_state_bearish={momentum_state}"
+            )
+    return signal_ok, details
+
+
 def _validation_for_regime(snapshot: MarketSnapshot, regime: Regime, direction: Direction, strategy: StrategyName) -> tuple[bool, list[str], str]:
     confluences: list[str] = []
     if snapshot.volume_ratio > 1.0:
@@ -27,10 +61,6 @@ def _validation_for_regime(snapshot: MarketSnapshot, regime: Regime, direction: 
             confluences.append("failed breakdown")
         if snapshot.double_bottom:
             confluences.append("double bottom")
-        if strategy == StrategyName.BTC_HMA:
-            signal_ok = bool(snapshot.hma_cross_up and snapshot.hma_fast and snapshot.hma_slow and snapshot.latest_close > snapshot.hma_slow)
-        else:
-            signal_ok = bool(snapshot.macz_cross_up and (snapshot.macz_hist or 0) > 0)
     else:
         structure_ok = snapshot.trend_down
         if snapshot.at_resistance:
@@ -41,13 +71,11 @@ def _validation_for_regime(snapshot: MarketSnapshot, regime: Regime, direction: 
             confluences.append("failed breakout")
         if snapshot.double_top:
             confluences.append("double top")
-        if strategy == StrategyName.BTC_HMA:
-            signal_ok = bool(snapshot.hma_cross_down and snapshot.hma_fast and snapshot.hma_slow and snapshot.latest_close < snapshot.hma_slow)
-        else:
-            signal_ok = bool(snapshot.macz_cross_down and (snapshot.macz_hist or 0) < 0)
+
+    signal_ok, trigger_details = _primary_trigger_status(snapshot, direction, strategy)
 
     if not signal_ok:
-        return False, confluences, "Primary trigger is not confirmed."
+        return False, confluences, f"Primary trigger is not confirmed ({trigger_details})."
 
     if regime == Regime.TRENDING:
         if structure_ok and snapshot.volume_ratio > 1.0:
@@ -94,7 +122,7 @@ def _position_gate(
 
     if pnl > 1:
         return DecisionAction.SKIP, "Opposing position is profitable. Do not fight a winner."
-    if pnl > 2:
+    if pnl < -2:
         return DecisionAction.CLOSE, "Opposing position is deeply underwater. Close and reassess."
     if regime in {Regime.TRENDING, Regime.RANGING}:
         return DecisionAction.CLOSE, "Opposing position conflicts with current regime bias."
@@ -209,6 +237,7 @@ def evaluate_signal(
         action=DecisionAction.OPEN if position is None or action == DecisionAction.CLOSE else action,
         reason=validation_reason if action != DecisionAction.CLOSE else f"{position_reason} {validation_reason}",
     )
+    plan.close_before_open = bool(position is not None and action == DecisionAction.CLOSE)
     plan.confluences = confluences
     plan.meta = {"market": asdict(market)}
     return plan

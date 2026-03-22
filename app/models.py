@@ -124,6 +124,7 @@ class TradePlan:
     position_size_asset: float | None = None
     position_size_usd: float | None = None
     max_hold_hours: int | None = None
+    close_before_open: bool = False
     regime_report: RegimeReport | None = None
     confluences: list[str] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)

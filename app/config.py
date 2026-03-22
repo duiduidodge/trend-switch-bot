@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import logging
 from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -55,8 +58,14 @@ class Settings(BaseSettings):
 
     def db_path(self) -> Path:
         path = Path(self.database_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        return path
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return path
+        except OSError:
+            fallback = Path("/tmp/trend_switch_bot.sqlite3")
+            fallback.parent.mkdir(parents=True, exist_ok=True)
+            logger.warning("Database path %s is not writable. Falling back to %s", path, fallback)
+            return fallback
 
 
 @lru_cache(maxsize=1)

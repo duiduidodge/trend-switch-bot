@@ -7,7 +7,7 @@ from typing import Any
 from app.config import Settings
 from app.db import BotDatabase
 from app.hyperliquid_client import HyperliquidClient
-from app.models import Asset, DecisionAction, Direction, Regime, StrategyName, TradePlan
+from app.models import Asset, DecisionAction, Direction, PositionSnapshot, Regime, StrategyName, TradePlan
 from app.regime import build_market_snapshot, detect_regime
 from app.strategy import evaluate_signal
 
@@ -21,8 +21,282 @@ class TrendSwitchService:
     def _signal_key(self, asset: Asset, direction: Direction) -> str:
         return f"last_signal:{asset.value}:{direction.value}"
 
+    def _is_paper_mode(self) -> bool:
+        return self.settings.dry_run
+
+    def _market_price(self, asset: Asset) -> float:
+        candles = self.client.candles(asset, self.settings.default_interval, 4)
+        return float(candles.iloc[-1]["close"])
+
+    def _paper_position_snapshot(self, row: dict[str, Any], refresh_mark: bool = True) -> PositionSnapshot:
+        current_price = self._market_price(Asset(row["asset"])) if refresh_mark else float(row["current_price"])
+        direction = Direction(row["direction"])
+        entry_price = float(row["entry_price"])
+        size_asset = float(row["size_asset"])
+        leverage = float(row["leverage"])
+        entry_notional = entry_price * size_asset
+        current_notional = current_price * size_asset
+        direction_multiplier = 1 if direction == Direction.LONG else -1
+        unrealized_pnl_usd = (current_price - entry_price) * size_asset * direction_multiplier
+        unrealized_pnl_pct = (unrealized_pnl_usd / max(entry_notional, 1e-9)) * 100
+        snapshot = PositionSnapshot(
+            asset=Asset(row["asset"]),
+            direction=direction,
+            entry_price=entry_price,
+            current_price=current_price,
+            size_asset=size_asset,
+            size_usd=current_notional,
+            leverage=leverage,
+            unrealized_pnl_usd=unrealized_pnl_usd,
+            unrealized_pnl_pct=unrealized_pnl_pct,
+            margin_used=entry_notional / max(leverage, 1e-9),
+            liquidation_price=row.get("liquidation_price"),
+            raw=row.get("raw", {}),
+        )
+        self.db.upsert_paper_position(
+            {
+                **row,
+                "asset": snapshot.asset.value,
+                "direction": snapshot.direction.value,
+                "current_price": snapshot.current_price,
+                "size_usd": snapshot.size_usd,
+                "unrealized_pnl_usd": snapshot.unrealized_pnl_usd,
+                "unrealized_pnl_pct": snapshot.unrealized_pnl_pct,
+                "margin_used": snapshot.margin_used,
+                "raw": snapshot.raw,
+            }
+        )
+        return snapshot
+
+    def _paper_positions(self, refresh_marks: bool = True) -> list[PositionSnapshot]:
+        return [self._paper_position_snapshot(row, refresh_mark=refresh_marks) for row in self.db.paper_positions()]
+
+    def _positions(self, refresh_marks: bool = True) -> list[PositionSnapshot]:
+        if self._is_paper_mode():
+            return self._paper_positions(refresh_marks=refresh_marks)
+        return self.client.positions()
+
+    def _account_value(self) -> float:
+        if not self._is_paper_mode():
+            return self.client.account_value()
+        unrealized = sum(position.unrealized_pnl_usd for position in self._paper_positions(refresh_marks=True))
+        return self.settings.paper_account_value + self.db.paper_realized_pnl() + unrealized
+
+    def _daily_closed_pnl(self) -> float:
+        if not self._is_paper_mode():
+            return self.client.daily_closed_pnl()
+        start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        return self.db.paper_closed_pnl_since(start)
+
+    def _open_orders(self) -> list[dict[str, Any]]:
+        if not self._is_paper_mode():
+            return self.client.open_orders() if self.client.account_address else []
+        orders: list[dict[str, Any]] = []
+        for row in self.db.paper_positions():
+            side = "SELL" if row["direction"] == Direction.LONG.value else "BUY"
+            if row.get("take_profit_price") is not None:
+                orders.append(
+                    {
+                        "coin": row["asset"],
+                        "side": side,
+                        "sz": row["size_asset"],
+                        "triggerPx": row["take_profit_price"],
+                        "limitPx": row["take_profit_price"],
+                        "paperType": "tp",
+                    }
+                )
+            if row.get("stop_price") is not None:
+                orders.append(
+                    {
+                        "coin": row["asset"],
+                        "side": side,
+                        "sz": row["size_asset"],
+                        "triggerPx": row["stop_price"],
+                        "limitPx": row["stop_price"],
+                        "paperType": "sl",
+                    }
+                )
+        return orders
+
+    def _execute_trade(self, plan: TradePlan) -> dict[str, Any]:
+        if not self._is_paper_mode():
+            return self.client.execute_trade(plan)
+        existing = self.db.paper_position(plan.asset.value)
+        if existing is not None and existing["direction"] != plan.direction.value:
+            raise RuntimeError(f"Cannot paper-open {plan.asset.value} {plan.direction.value} against existing opposing position.")
+
+        opened_at = existing["opened_at"] if existing is not None else datetime.now(timezone.utc).isoformat()
+        existing_size_asset = float(existing["size_asset"]) if existing is not None else 0.0
+        existing_entry_notional = float(existing["entry_price"]) * existing_size_asset if existing is not None else 0.0
+        new_size_asset = float(plan.position_size_asset or 0.0)
+        total_size_asset = existing_size_asset + new_size_asset
+        if total_size_asset <= 0:
+            raise RuntimeError("Paper trade size must be positive.")
+
+        total_entry_notional = existing_entry_notional + (plan.entry_price * new_size_asset)
+        average_entry = total_entry_notional / total_size_asset
+        current_notional = total_size_asset * plan.entry_price
+        payload = {
+            "asset": plan.asset.value,
+            "direction": plan.direction.value,
+            "entry_price": average_entry,
+            "current_price": plan.entry_price,
+            "size_asset": total_size_asset,
+            "size_usd": current_notional,
+            "leverage": float(plan.leverage or 1),
+            "unrealized_pnl_usd": 0.0,
+            "unrealized_pnl_pct": 0.0,
+            "margin_used": total_entry_notional / max(float(plan.leverage or 1), 1e-9),
+            "liquidation_price": None,
+            "strategy": plan.strategy.value,
+            "stop_price": plan.stop_price,
+            "take_profit_price": plan.take_profit_price,
+            "max_hold_hours": plan.max_hold_hours,
+            "opened_at": opened_at,
+            "raw": {
+                "mode": "paper",
+                "last_plan": asdict(plan),
+            },
+        }
+        self.db.upsert_paper_position(payload)
+        return {
+            "status": "paper",
+            "action": "PYRAMID" if existing is not None else "OPEN",
+            "asset": plan.asset.value,
+            "direction": plan.direction.value,
+            "entry_price": average_entry,
+            "mark_price": plan.entry_price,
+            "size_asset": total_size_asset,
+            "size_usd": current_notional,
+            "stop_price": plan.stop_price,
+            "take_profit_price": plan.take_profit_price,
+        }
+
+    def _close_position_execution(self, asset: Asset, reason: str | None = None, exit_price: float | None = None) -> dict[str, Any]:
+        if not self._is_paper_mode():
+            return self.client.close_position(asset)
+        row = self.db.paper_position(asset.value)
+        if row is None:
+            return {"status": "paper", "action": "close", "asset": asset.value, "message": "No open paper position."}
+
+        snapshot = self._paper_position_snapshot(row, refresh_mark=False)
+        close_price = exit_price if exit_price is not None else self._market_price(asset)
+        direction_multiplier = 1 if snapshot.direction == Direction.LONG else -1
+        pnl_usd = (close_price - snapshot.entry_price) * snapshot.size_asset * direction_multiplier
+        entry_notional = snapshot.entry_price * snapshot.size_asset
+        exit_notional = close_price * snapshot.size_asset
+        pnl_pct = (pnl_usd / max(entry_notional, 1e-9)) * 100
+        closed_at = datetime.now(timezone.utc).isoformat()
+        self.db.insert_paper_closed_trade(
+            {
+                "asset": asset.value,
+                "direction": snapshot.direction.value,
+                "entry_price": snapshot.entry_price,
+                "exit_price": close_price,
+                "size_asset": snapshot.size_asset,
+                "entry_notional_usd": entry_notional,
+                "exit_notional_usd": exit_notional,
+                "leverage": snapshot.leverage,
+                "pnl_usd": pnl_usd,
+                "pnl_pct": pnl_pct,
+                "strategy": row.get("strategy"),
+                "reason": reason,
+                "opened_at": row.get("opened_at"),
+                "closed_at": closed_at,
+                "raw": row.get("raw", {}),
+            }
+        )
+        self.db.delete_paper_position(asset.value)
+        return {
+            "status": "paper",
+            "action": "close",
+            "asset": asset.value,
+            "exit_price": close_price,
+            "closed_pnl": pnl_usd,
+            "pnl_pct": pnl_pct,
+            "reason": reason,
+            "closed_at": closed_at,
+        }
+
+    def _partial_close_paper_position(self, position: PositionSnapshot, fraction: float, reason: str, exit_price: float) -> dict[str, Any]:
+        row = self.db.paper_position(position.asset.value)
+        if row is None:
+            return {"status": "paper", "action": "partial", "asset": position.asset.value, "message": "No open paper position."}
+
+        fraction = max(0.0, min(fraction, 1.0))
+        close_size = position.size_asset * fraction
+        remain_size = position.size_asset - close_size
+        direction_multiplier = 1 if position.direction == Direction.LONG else -1
+        entry_notional = position.entry_price * close_size
+        exit_notional = exit_price * close_size
+        pnl_usd = (exit_price - position.entry_price) * close_size * direction_multiplier
+        pnl_pct = (pnl_usd / max(entry_notional, 1e-9)) * 100
+        self.db.insert_paper_closed_trade(
+            {
+                "asset": position.asset.value,
+                "direction": position.direction.value,
+                "entry_price": position.entry_price,
+                "exit_price": exit_price,
+                "size_asset": close_size,
+                "entry_notional_usd": entry_notional,
+                "exit_notional_usd": exit_notional,
+                "leverage": position.leverage,
+                "pnl_usd": pnl_usd,
+                "pnl_pct": pnl_pct,
+                "strategy": row.get("strategy"),
+                "reason": reason,
+                "opened_at": row.get("opened_at"),
+                "closed_at": datetime.now(timezone.utc).isoformat(),
+                "raw": row.get("raw", {}),
+            }
+        )
+        if remain_size <= 1e-12:
+            self.db.delete_paper_position(position.asset.value)
+        else:
+            remain_entry_notional = position.entry_price * remain_size
+            self.db.upsert_paper_position(
+                {
+                    **row,
+                    "size_asset": remain_size,
+                    "current_price": exit_price,
+                    "size_usd": exit_price * remain_size,
+                    "unrealized_pnl_usd": (exit_price - position.entry_price) * remain_size * direction_multiplier,
+                    "unrealized_pnl_pct": ((exit_price - position.entry_price) * direction_multiplier / max(position.entry_price, 1e-9)) * 100,
+                    "margin_used": remain_entry_notional / max(position.leverage, 1e-9),
+                    "raw": row.get("raw", {}),
+                }
+            )
+        return {
+            "status": "paper",
+            "action": "partial",
+            "asset": position.asset.value,
+            "fraction": fraction,
+            "exit_price": exit_price,
+            "closed_pnl": pnl_usd,
+            "pnl_pct": pnl_pct,
+        }
+
+    def _update_paper_position_orders(self, asset: Asset, stop_price: float | None = None, take_profit_price: float | None = None) -> dict[str, Any]:
+        row = self.db.paper_position(asset.value)
+        if row is None:
+            return {"status": "paper", "action": "adjust", "asset": asset.value, "message": "No open paper position."}
+        payload = {
+            **row,
+            "stop_price": stop_price if stop_price is not None else row.get("stop_price"),
+            "take_profit_price": take_profit_price if take_profit_price is not None else row.get("take_profit_price"),
+            "raw": row.get("raw", {}),
+        }
+        self.db.upsert_paper_position(payload)
+        return {
+            "status": "paper",
+            "action": "adjust",
+            "asset": asset.value,
+            "stop_price": payload["stop_price"],
+            "take_profit_price": payload["take_profit_price"],
+        }
+
     def _should_halt_for_daily_loss(self, account_value: float) -> bool:
-        pnl = self.client.daily_closed_pnl()
+        pnl = self._daily_closed_pnl()
         return pnl <= -(account_value * self.settings.daily_loss_limit_fraction)
 
     def stats(self) -> tuple[int, int]:
@@ -41,6 +315,8 @@ class TrendSwitchService:
         return win_count, loss_count
 
     def realized_pnl(self) -> float:
+        if self._is_paper_mode():
+            return self.db.paper_realized_pnl()
         realized = 0.0
         for log in self.db.recent_logs(limit=500):
             payload = log.get("payload", {})
@@ -56,13 +332,13 @@ class TrendSwitchService:
         return max((peak - account_value) / peak * 100, 0.0)
 
     def run_signals(self) -> list[dict[str, Any]]:
-        account_value = self.client.account_value()
+        account_value = self._account_value()
         if self._should_halt_for_daily_loss(account_value):
             payload = {"reason": "Daily loss limit reached.", "account_value": account_value}
             self.db.log("signals", DecisionAction.SKIP.value, payload)
             return [payload]
 
-        positions = self.client.positions()
+        positions = self._positions(refresh_marks=True)
         outputs: list[dict[str, Any]] = []
         configs = [
             (Asset.BTC, StrategyName.BTC_HMA, Direction.LONG),
@@ -83,11 +359,11 @@ class TrendSwitchService:
 
             payload = asdict(plan)
             payload["timestamp"] = datetime.now(timezone.utc).isoformat()
-            if plan.action == DecisionAction.CLOSE and position is not None:
-                close_result = self.client.close_position(asset)
+            if plan.close_before_open and position is not None:
+                close_result = self._close_position_execution(asset, reason=plan.reason, exit_price=market.mark_price)
                 payload["close_result"] = close_result
             if plan.action in {DecisionAction.OPEN, DecisionAction.PYRAMID}:
-                execution = self.client.execute_trade(plan)
+                execution = self._execute_trade(plan)
                 payload["execution"] = execution
             self.db.log("signals", plan.action.value, payload, asset.value, direction.value)
             self.db.set_state(self._signal_key(asset, direction), candle_time)
@@ -100,7 +376,7 @@ class TrendSwitchService:
         return outputs
 
     def run_monitor(self) -> list[dict[str, Any]]:
-        positions = self.client.positions()
+        positions = self._positions(refresh_marks=True)
         if not positions:
             payload = {"message": "No open positions to manage"}
             self.db.log("monitor", DecisionAction.NONE.value, payload)
@@ -162,7 +438,11 @@ class TrendSwitchService:
             }
 
             if action == DecisionAction.CLOSE:
-                payload["execution"] = self.client.close_position(position.asset)
+                payload["execution"] = self._close_position_execution(position.asset, reason=reason, exit_price=market.mark_price)
+            elif action == DecisionAction.PARTIAL and partial_fraction is not None and self._is_paper_mode():
+                payload["execution"] = self._partial_close_paper_position(position, partial_fraction, reason, market.mark_price)
+            elif action == DecisionAction.ADJUST and self._is_paper_mode():
+                payload["execution"] = self._update_paper_position_orders(position.asset, stop_price=new_stop)
             self.db.log("monitor", action.value, payload, position.asset.value, position.direction.value)
             outputs.append(payload)
 
@@ -173,7 +453,7 @@ class TrendSwitchService:
         return outputs
 
     def close_position(self, asset: Asset) -> dict[str, Any]:
-        result = self.client.close_position(asset)
+        result = self._close_position_execution(asset, reason="Manual close requested.")
         payload = {
             "asset": asset.value,
             "action": DecisionAction.CLOSE.value,
@@ -193,10 +473,10 @@ class TrendSwitchService:
         return payload
 
     def dashboard_data(self) -> dict[str, Any]:
-        account_value = self.client.account_value()
-        daily_pnl = self.client.daily_closed_pnl()
-        positions = [asdict(position) for position in self.client.positions()]
-        open_orders = self.client.open_orders() if self.client.account_address else []
+        account_value = self._account_value()
+        daily_pnl = self._daily_closed_pnl()
+        positions = [asdict(position) for position in self._positions(refresh_marks=True)]
+        open_orders = self._open_orders()
         recent_logs = self.db.recent_logs(limit=40)
         latest_signal_state = {
             key: value
@@ -250,5 +530,6 @@ class TrendSwitchService:
             "env": self.settings.app_env,
             "dry_run": self.settings.dry_run,
             "hyperliquid_env": self.settings.hyperliquid_env,
+            "paper_positions": [asdict(position) for position in self._positions(refresh_marks=True)] if self._is_paper_mode() else [],
             "recent_logs": self.db.recent_logs(),
         }
