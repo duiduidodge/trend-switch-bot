@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     hyperliquid_secret_key: str = ""
     hyperliquid_account_address: str = ""
     hyperliquid_vault_address: str | None = None
+    market_data_url: str | None = None
+    market_data_timeout_seconds: int = 20
 
     noon_hub_url: str | None = None
     noon_hub_ingest_key: str | None = None

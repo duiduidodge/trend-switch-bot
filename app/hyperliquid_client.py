@@ -4,6 +4,7 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 import logging
+import math
 
 import pandas as pd
 import requests
@@ -44,6 +45,26 @@ class HyperliquidClient:
         response = self.session.post(f"{self.base_url}/info", json=payload, timeout=20)
         response.raise_for_status()
         return response.json()
+
+    def _market_data_enabled(self) -> bool:
+        return bool(self.settings.market_data_url)
+
+    def _market_data_get(self, path: str, params: dict[str, Any]) -> Any:
+        if not self.settings.market_data_url:
+            raise RuntimeError("MARKET_DATA_URL is not configured.")
+        base_url = self.settings.market_data_url.rstrip("/")
+        response = self.session.get(
+            f"{base_url}{path}",
+            params=params,
+            timeout=self.settings.market_data_timeout_seconds,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def _interval_hours(self, interval: str) -> int:
+        if interval.endswith("h"):
+            return int(interval[:-1])
+        raise ValueError(f"Unsupported interval for MCP candles: {interval}")
 
     @property
     def account_address(self) -> str:
@@ -118,6 +139,34 @@ class HyperliquidClient:
         return None
 
     def candles(self, asset: Asset, interval: str, hours: int) -> pd.DataFrame:
+        if self._market_data_enabled():
+            bars = max(1, math.ceil(hours / self._interval_hours(interval)))
+            payload = self._market_data_get(
+                "/candles",
+                {
+                    "symbol": asset.value,
+                    "timeframe": interval,
+                    "limit": bars,
+                },
+            )
+            candles = payload["candles"]
+            df = pd.DataFrame(
+                {
+                    "open_time": candles["openTimes"],
+                    "close_time": candles["closeTimes"],
+                    "open": candles["opens"],
+                    "high": candles["highs"],
+                    "low": candles["lows"],
+                    "close": candles["closes"],
+                    "volume": candles["volumes"],
+                }
+            )
+            if df.empty:
+                raise RuntimeError(f"No candles returned for {asset.value}")
+            for column in ["open", "high", "low", "close", "volume"]:
+                df[column] = df[column].astype(float)
+            return df
+
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=hours)
         rows = self._post_info(
@@ -150,6 +199,9 @@ class HyperliquidClient:
         return df
 
     def funding_rate(self, asset: Asset) -> float:
+        if self._market_data_enabled():
+            payload = self._market_data_get("/funding", {"symbol": asset.value})
+            return float(payload["fundingRate"])
         meta, ctxs = self._post_info({"type": "metaAndAssetCtxs"})
         for asset_meta, ctx in zip(meta["universe"], ctxs):
             if asset_meta["name"] == asset.value:
