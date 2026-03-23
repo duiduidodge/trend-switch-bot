@@ -45,6 +45,9 @@ class NoonHubReporter:
         )
         response.raise_for_status()
 
+    def _service_positions(self):
+        return self.service._positions(refresh_marks=True)
+
     def _bot_identity(self) -> dict[str, Any]:
         return {
             "slug": self.settings.noon_hub_bot_slug,
@@ -86,9 +89,9 @@ class NoonHubReporter:
             return
 
         try:
-            account_value = self.service.client.account_value()
-            daily_pnl = self.service.client.daily_closed_pnl()
-            positions = self.service.client.positions()
+            account_value = self.service._account_value()
+            daily_pnl = self.service._daily_closed_pnl()
+            positions = self._service_positions()
             win_count, loss_count = self.service.stats()
             closed_count = win_count + loss_count
             realized_pnl = self.service.realized_pnl()
@@ -113,28 +116,29 @@ class NoonHubReporter:
                 },
             )
 
-            self._post(
-                "/hub/positions",
-                {
-                    "botSlug": self.settings.noon_hub_bot_slug,
-                    "name": self.settings.noon_hub_bot_name,
-                    "snapshotTime": observed_at,
-                    "positions": [
-                        {
-                            "symbol": position.asset.value,
-                            "side": position.direction.value,
-                            "status": "OPEN",
-                            "quantity": position.size_asset,
-                            "entryPrice": position.entry_price,
-                            "markPrice": position.current_price,
-                            "pnlUsd": position.unrealized_pnl_usd,
-                            "pnlPct": position.unrealized_pnl_pct,
-                            "openedAt": observed_at,
-                        }
-                        for position in positions
-                    ],
-                },
-            )
+            if positions:
+                self._post(
+                    "/hub/positions",
+                    {
+                        "botSlug": self.settings.noon_hub_bot_slug,
+                        "name": self.settings.noon_hub_bot_name,
+                        "snapshotTime": observed_at,
+                        "positions": [
+                            {
+                                "symbol": position.asset.value,
+                                "side": position.direction.value,
+                                "status": "OPEN",
+                                "quantity": position.size_asset,
+                                "entryPrice": position.entry_price,
+                                "markPrice": position.current_price,
+                                "pnlUsd": position.unrealized_pnl_usd,
+                                "pnlPct": position.unrealized_pnl_pct,
+                                "openedAt": observed_at,
+                            }
+                            for position in positions
+                        ],
+                    },
+                )
         except Exception:
             logger.exception("Failed to publish Noon Hub snapshot")
 
