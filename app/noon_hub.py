@@ -89,13 +89,15 @@ class NoonHubReporter:
             return
 
         try:
-            account_value = self.service._account_value()
-            daily_pnl = self.service._daily_closed_pnl()
-            positions = self._service_positions()
+            dashboard = self.service.dashboard_data()
+            overview = dashboard["overview"]
+            positions = dashboard["positions"]
+            account_value = float(overview["account_value"])
+            daily_pnl = float(overview["daily_closed_pnl"])
             win_count, loss_count = self.service.stats()
             closed_count = win_count + loss_count
             realized_pnl = self.service.realized_pnl()
-            unrealized_pnl = sum(position.unrealized_pnl_usd for position in positions)
+            unrealized_pnl = sum(float(position["unrealized_pnl_usd"]) for position in positions)
             drawdown_pct = self.service.drawdown_pct(account_value)
             observed_at = self._iso_now()
 
@@ -105,7 +107,7 @@ class NoonHubReporter:
                     "botSlug": self.settings.noon_hub_bot_slug,
                     "name": self.settings.noon_hub_bot_name,
                     "equityUsd": account_value,
-                    "cashUsd": max(account_value - sum(position.margin_used for position in positions), 0.0),
+                    "cashUsd": max(account_value - sum(float(position["margin_used"]) for position in positions), 0.0),
                     "dailyPnlUsd": daily_pnl,
                     "realizedPnlUsd": realized_pnl,
                     "unrealizedPnlUsd": unrealized_pnl,
@@ -125,14 +127,14 @@ class NoonHubReporter:
                         "snapshotTime": observed_at,
                         "positions": [
                             {
-                                "symbol": position.asset.value,
-                                "side": position.direction.value,
+                                "symbol": position["asset"],
+                                "side": position["direction"],
                                 "status": "OPEN",
-                                "quantity": position.size_asset,
-                                "entryPrice": position.entry_price,
-                                "markPrice": position.current_price,
-                                "pnlUsd": position.unrealized_pnl_usd,
-                                "pnlPct": position.unrealized_pnl_pct,
+                                "quantity": position["size_asset"],
+                                "entryPrice": position["entry_price"],
+                                "markPrice": position["current_price"],
+                                "pnlUsd": position["unrealized_pnl_usd"],
+                                "pnlPct": position["unrealized_pnl_pct"],
                                 "openedAt": observed_at,
                             }
                             for position in positions
