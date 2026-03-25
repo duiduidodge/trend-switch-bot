@@ -345,6 +345,8 @@ class TrendSwitchService:
             (Asset.BTC, StrategyName.BTC_HMA, Direction.SHORT),
             (Asset.ETH, StrategyName.ETH_MACZ, Direction.LONG),
             (Asset.ETH, StrategyName.ETH_MACZ, Direction.SHORT),
+            (Asset.PAXG, StrategyName.GOLD_HMA, Direction.LONG),
+            (Asset.PAXG, StrategyName.GOLD_HMA, Direction.SHORT),
         ]
 
         for asset, strategy, direction in configs:
@@ -488,6 +490,8 @@ class TrendSwitchService:
                 "BTC_SHORT": self.db.get_state(self._signal_key(Asset.BTC, Direction.SHORT)),
                 "ETH_LONG": self.db.get_state(self._signal_key(Asset.ETH, Direction.LONG)),
                 "ETH_SHORT": self.db.get_state(self._signal_key(Asset.ETH, Direction.SHORT)),
+                "PAXG_LONG": self.db.get_state(self._signal_key(Asset.PAXG, Direction.LONG)),
+                "PAXG_SHORT": self.db.get_state(self._signal_key(Asset.PAXG, Direction.SHORT)),
             }.items()
         }
         latest_actions: dict[str, Any] = {}

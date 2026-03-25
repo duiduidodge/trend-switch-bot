@@ -15,6 +15,7 @@ class Regime(str, Enum):
 class Asset(str, Enum):
     BTC = "BTC"
     ETH = "ETH"
+    PAXG = "PAXG"
 
 
 class Direction(str, Enum):
@@ -33,6 +34,7 @@ class Direction(str, Enum):
 class StrategyName(str, Enum):
     BTC_HMA = "BTC_HMA"
     ETH_MACZ = "ETH_MACZ"
+    GOLD_HMA = "GOLD_HMA"
 
 
 class DecisionAction(str, Enum):

@@ -13,7 +13,7 @@ def _count_open_positions(positions: list[PositionSnapshot]) -> int:
 
 
 def _primary_trigger_status(snapshot: MarketSnapshot, direction: Direction, strategy: StrategyName) -> tuple[bool, str]:
-    if strategy == StrategyName.BTC_HMA:
+    if strategy in {StrategyName.BTC_HMA, StrategyName.GOLD_HMA}:
         if direction == Direction.LONG:
             trend_state = bool(snapshot.hma_fast and snapshot.hma_slow and snapshot.hma_fast > snapshot.hma_slow and snapshot.latest_close > snapshot.hma_slow)
             signal_ok = bool(snapshot.hma_cross_up or trend_state)
@@ -244,7 +244,10 @@ def evaluate_signal(
 
 
 def position_structure_shift_reason(position: PositionSnapshot, market: MarketSnapshot) -> str | None:
-    strategy = StrategyName.BTC_HMA if position.asset == Asset.BTC else StrategyName.ETH_MACZ
+    if position.asset in {Asset.BTC, Asset.PAXG}:
+        strategy = StrategyName.GOLD_HMA if position.asset == Asset.PAXG else StrategyName.BTC_HMA
+    else:
+        strategy = StrategyName.ETH_MACZ
     opposite_direction = position.direction.opposite
     opposite_trigger_ok, _ = _primary_trigger_status(market, opposite_direction, strategy)
     if not opposite_trigger_ok:

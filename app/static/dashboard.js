@@ -143,6 +143,8 @@ function renderSignalMatrix(data) {
     ["BTC SHORT", data.latest_signal_state.BTC_SHORT],
     ["ETH LONG", data.latest_signal_state.ETH_LONG],
     ["ETH SHORT", data.latest_signal_state.ETH_SHORT],
+    ["PAXG LONG", data.latest_signal_state.PAXG_LONG],
+    ["PAXG SHORT", data.latest_signal_state.PAXG_SHORT],
   ];
   els.signalMatrix.innerHTML = `
     <div class="table-head">Signal · Last latch · Status</div>
@@ -267,7 +269,7 @@ async function runControl(url, title, body) {
 }
 
 document.querySelectorAll("[data-action='signals']").forEach((button) => {
-  button.addEventListener("click", () => runControl("/api/run/signals", "Signal scan complete", "The bot re-evaluated BTC and ETH entries."));
+  button.addEventListener("click", () => runControl("/api/run/signals", "Signal scan complete", "The bot re-evaluated BTC, ETH, and PAXG entries."));
 });
 
 document.querySelectorAll("[data-action='monitor']").forEach((button) => {

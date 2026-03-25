@@ -6,6 +6,7 @@ This implementation follows your framework:
 
 - trades `BTC` with an HMA Cloud trigger on `1H`
 - trades `ETH` with a MAC-Z trigger on `1H`
+- trades `PAXG` (Gold) with an HMA Cloud trigger on `1H`
 - detects regime before every decision
 - enforces one position per asset
 - adapts risk, leverage, stops, targets, filters, and pyramiding by regime
@@ -29,11 +30,12 @@ Noon Hub integration:
 
 Signal cycle:
 
-1. Pull latest `1H` candles for BTC and ETH from Hyperliquid
+1. Pull latest `1H` candles for BTC, ETH, and PAXG from Hyperliquid
 2. Compute regime features: ADX, ATR percentile, EMA alignment, price structure, wick behavior, funding
 3. Run the relevant trigger:
    - BTC: HMA Cloud bullish / bearish
    - ETH: MAC-Z bullish / bearish
+   - PAXG: HMA Cloud bullish / bearish
 4. Validate regime-specific entry conditions
 5. Check existing position and apply conflict / pyramid logic
 6. Size the trade from account value and stop distance
