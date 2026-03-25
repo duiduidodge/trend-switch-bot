@@ -14,7 +14,7 @@ def test_normal_long_sizing_matches_example_shape():
     )
     assert round(result["stop_price"], 2) == 90_250.00
     assert round(result["take_profit_price"], 2) == 104_500.00
-    assert round(result["position_size_usd"], 2) == 250.00
+    assert round(result["position_size_usd"], 2) == 1000.00
 
 
 def test_normal_short_sizing_is_symmetric():
@@ -29,4 +29,4 @@ def test_normal_short_sizing_is_symmetric():
     )
     assert round(result["stop_price"], 2) == 3_150.00
     assert round(result["take_profit_price"], 2) == 2_700.00
-    assert round(result["position_size_usd"], 2) == 250.00
+    assert round(result["position_size_usd"], 2) == 1000.00

@@ -9,7 +9,7 @@ from app.db import BotDatabase
 from app.hyperliquid_client import HyperliquidClient
 from app.models import Asset, DecisionAction, Direction, PositionSnapshot, Regime, StrategyName, TradePlan
 from app.regime import build_market_snapshot, detect_regime
-from app.strategy import evaluate_signal
+from app.strategy import evaluate_signal, position_structure_shift_reason
 
 
 class TrendSwitchService:
@@ -391,8 +391,11 @@ class TrendSwitchService:
             reason = "No change."
             new_stop = None
             partial_fraction = None
+            structure_shift_reason = position_structure_shift_reason(position, market)
 
-            if position.direction == Direction.LONG:
+            if structure_shift_reason is not None:
+                action, reason = DecisionAction.CLOSE, structure_shift_reason
+            elif position.direction == Direction.LONG:
                 opposite_trend = market.ema12 < market.ema26 and market.adx > 30
                 if market.latest_close < position.entry_price and regime_report.regime == Regime.VOLATILE:
                     action, reason = DecisionAction.CLOSE, "Long position is underwater in volatile regime."

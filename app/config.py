@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     candle_lookback_hours: int = 24 * 25
     max_concurrent_positions: int = 2
     daily_loss_limit_fraction: float = 0.03
-    max_notional_multiple: float = 3.0
+    max_notional_multiple: float = 0.5
     max_stop_fraction: float = 0.08
 
     hma_fast_length: int = 20

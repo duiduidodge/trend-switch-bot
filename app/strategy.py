@@ -241,3 +241,26 @@ def evaluate_signal(
     plan.confluences = confluences
     plan.meta = {"market": asdict(market)}
     return plan
+
+
+def position_structure_shift_reason(position: PositionSnapshot, market: MarketSnapshot) -> str | None:
+    strategy = StrategyName.BTC_HMA if position.asset == Asset.BTC else StrategyName.ETH_MACZ
+    opposite_direction = position.direction.opposite
+    opposite_trigger_ok, _ = _primary_trigger_status(market, opposite_direction, strategy)
+    if not opposite_trigger_ok:
+        return None
+
+    bearish_structure = (
+        market.trend_down
+        or (market.ema12 < market.ema26 and market.latest_close < market.sma50)
+    )
+    bullish_structure = (
+        market.trend_up
+        or (market.ema12 > market.ema26 and market.latest_close > market.sma50)
+    )
+
+    if position.direction == Direction.LONG and bearish_structure:
+        return "Long thesis invalidated by bearish market structure shift."
+    if position.direction == Direction.SHORT and bullish_structure:
+        return "Short thesis invalidated by bullish market structure shift."
+    return None

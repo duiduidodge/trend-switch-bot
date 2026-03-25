@@ -16,19 +16,19 @@ class RiskProfile:
 
 def risk_profile_for_regime(regime: Regime) -> RiskProfile:
     if regime == Regime.TRENDING:
-        return RiskProfile(0.0175, 0.06, 6, 2.0, 84)
+        return RiskProfile(0.05, 0.06, 6, 2.0, 84)
     if regime == Regime.RANGING:
-        return RiskProfile(0.0125, 0.04, 4, 1.5, 36)
+        return RiskProfile(0.04, 0.04, 4, 1.5, 36)
     if regime == Regime.VOLATILE:
-        return RiskProfile(0.0075, 0.05, 3, 2.0, 36)
-    return RiskProfile(0.0125, 0.05, 5, 2.0, 60)
+        return RiskProfile(0.025, 0.05, 3, 2.0, 36)
+    return RiskProfile(0.05, 0.05, 5, 2.0, 60)
 
 
 def pyramid_risk_percent(regime: Regime) -> float:
     if regime == Regime.TRENDING:
-        return 0.01
+        return 0.025
     if regime == Regime.RANGING:
-        return 0.0075
+        return 0.02
     return 0.0
 
 
